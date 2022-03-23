@@ -81,10 +81,11 @@ survey = pd.read_stata(zip_survey.open('survey/workingsample8.dta'))
 #########################
 
 # keep relevant columns
-survey = survey[['county', 'transno','transname', 'a1_7','a3_15','a3_22','hh_member1','hh_member2', 'hh_member3', 'hh_member4', 'hh_member5', 'l1_1','l1_2','b1_4','c1_3']]
+survey = survey[['county', 'transno','transname', 'a1_7','a3_15','a3_22','hh_member1','hh_member2', 'hh_member3', 'hh_member4', 'hh_member5', 'l1_1','l1_2']]
 
-cleanup_yesno = {'b1_4': {'Yes':1,'No':0},'c1_3':{'Yes':1,'No':0}}
-survey = survey.replace(cleanup_yesno) 
+survey['treatment'] = survey['a1_7'].apply(lambda row: 1 if int(re.sub(r'\D','',row)) < 32 else 0)
+#cleanup_yesno = {'b1_4': {'Yes':1,'No':0},'c1_3':{'Yes':1,'No':0}}
+#survey = survey.replace(cleanup_yesno) 
 
 #survey[survey.b1_4 != survey.c1_3]
 
@@ -208,7 +209,6 @@ cols.append('offered_service')
 
 merged[merged[cols].duplicated(keep=False)].sort_values(survey.columns.tolist()).drop(['serial_num','account_no','txnumber'], axis=1)
 
-merged.groupby(['b1_4'])['county'].count()/merged.shape[0]
-merged.groupby(['c1_3'])['county'].count()/merged.shape[0]
+merged.groupby(['treatment'])['county'].count()/merged.shape[0]
 
 #survey['matched'] = survey.merge(merged[survey.columns.tolist()].drop_duplicates(), how='left', indicator=True, on = survey.columns.tolist())['_merge'].ne('left_only')
