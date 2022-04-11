@@ -45,7 +45,8 @@ def get_match(df, col, df_choices, col_choices, common, cutoff = 80, method = fu
         matches_sorted = dict(sorted(matches.items(), key=lambda x:x[1]))
         max_match = (list(matches_sorted.keys())[0], list(matches_sorted.values())[0])
         # return best match (index in df_choices, similarity score)
-        return max_match
+        dct= {'survey_i':max_match[0], 'pp_i':df.name, 'score':max_match[1]}
+        return dct
 
 def match_and_merge(df1, df2, newcol, df1_col, df2_cols, common = 'transno', cutoff = 80, fuzzy = fuzz.ratio):
     '''
@@ -55,7 +56,7 @@ def match_and_merge(df1, df2, newcol, df1_col, df2_cols, common = 'transno', cut
     df1[newcol] = df1.apply(get_match, args = (df1_col, df2, df2_cols, common, cutoff, fuzzy), axis = 1)
 
     # extract the index
-    df1[f'{newcol}_index'] = df1[newcol].apply(lambda row: row[0] if row is not None else np.nan)
+    df1[f'{newcol}_index'] = df1[newcol].apply(lambda row: row['survey_i'] if row is not None else np.nan)
 
     # remove non informative entries
     df1_clean = df1[df1[newcol].notnull() & (df1[newcol] != '')]
@@ -180,58 +181,139 @@ pp = pp.drop('survey_trans', axis=1)
 
 # how to choose algorithm : https://pypi.org/project/fuzzywuzzy/
 
-#keep always the highest
-# drop afterwars if score 100 - > don't need to match on the name
 
-# df with merges on serial number
+###################  merge on serial number ###################
+#  df with merges on serial number
 merge_serial = match_and_merge(pp, survey, newcol = 'closest_serial',df1_col = 'serial_num',df2_cols=['l1_1','l1_2'],cutoff = 65, fuzzy=fuzz.ratio)
 
+'''
+1.	If there is a 100 score match based on the meter (serial) number, remove that TX observation from the list of possible matches to reduce duplicate matches
+'''
 
 # list of rows in survey that got matched by serial_num at a score of minimum 
-min_score = 97
-id_merge_ser = merge_serial['closest_serial'].apply(lambda row: row[0] if row[1] >= min_score else None).dropna().tolist()
+min_score = 100
 
+lst_survey_merged = merge_serial['closest_serial'].apply(lambda row: row['survey_i'] if row['score'] >= min_score else None).dropna().tolist()
+lst_pp_merged = merge_serial['closest_serial'].apply(lambda row: row['pp_i'] if row['score'] >= min_score else None).dropna().tolist()
+
+
+###################  merge on account number ###################
 # df with merges on account number that are not already merged before
-df_input = survey.drop(id_merge_ser)
-merge_account = match_and_merge(pp, df_input, newcol = 'closest_account',df1_col = 'account_no',df2_cols=['l1_1','l1_2'], cutoff = 65, fuzzy=fuzz.ratio)
+df_input = survey.drop(lst_survey_merged)
+pp_input = pp.loc[~pp.index.isin(lst_pp_merged)]
+
+merge_account = match_and_merge(pp_input, df_input, newcol = 'closest_account',df1_col = 'account_no',df2_cols=['l1_1','l1_2'], cutoff = 65, fuzzy=fuzz.ratio)
 
 # get rows that are merged having at least minimum score
-id_merge_ser_acc = merge_account['closest_account'].apply(lambda row: row[0] if row[1] >= min_score else None).dropna().tolist()
-id_merge_ser_acc.extend(id_merge_ser)
+lst_survey_merged_acc = merge_account['closest_account'].apply(lambda row: row['survey_i'] if row['score'] >= min_score else None).dropna().tolist()
+lst_survey_merged_acc.extend(lst_survey_merged)
+lst_pp_merged_acc = merge_account['closest_account'].apply(lambda row: row['pp_i'] if row['score'] >= min_score else None).dropna().tolist()
+lst_pp_merged_acc.extend(lst_pp_merged)
 
+###################  merge on names ###################
 
 # df with merges on name that are not already merged before
 names_list = ['a3_15','a3_22','hh_member1','hh_member2', 'hh_member3', 'hh_member4', 'hh_member5','hh_member6','hh_member7','hh_member8','hh_member9','hh_member10','hh_member11','hh_member12','hh_member13','hh_member14','hh_member15']
-df_input = survey.drop(id_merge_ser_acc)
-merge_name = match_and_merge(pp, df_input, newcol = 'closest_name',df1_col = 'full_name',df2_cols=names_list,cutoff = 70, fuzzy=fuzz.token_set_ratio)
 
-# concat all merged data
+df_input = survey.drop(lst_survey_merged_acc)
+pp_input = pp.loc[~pp.index.isin(lst_pp_merged_acc)]
+
+merge_name = match_and_merge(pp_input, df_input, newcol = 'closest_name',df1_col = 'full_name',df2_cols=names_list,cutoff = 70, fuzzy=fuzz.token_set_ratio)
+
+################### concat all merged data  ###################
 merged = pd.concat([merge_serial, merge_account, merge_name])
-# drop if duplicates in all columns accept ['closest_serial','closest_name','closest_account']
-merged = merged.drop_duplicates(subset=merged.columns.difference(['closest_serial','closest_name','closest_account']))
+
+
+'''
+2.	For serial number matched at a high score that is not 100 (e.g.  90<=score<100) , let’s also check what the matching score is for the names of the SAME matched observation. If that is high enough (e.g. score>=75) OR there is any overlap in the name, then we declare this as a good match. 
+'''
+def good_match(df, cols, ser_min = 90, name_min = 75):
+    '''
+    declare good matches
+    '''
+    # if score serial = 100
+    if df[cols[0]] not in [None, np.nan]:
+        bool = df[cols[0]]['score'] == 100
+        return bool
+    # if score serial between 90-100 and score name > 75
+    elif (df[cols[0]] not in [None, np.nan]) & (df[cols[1]] not in [None, np.nan]) :
+        # check if same match
+        same_survey = df[cols[0]]['survey_i'] == df[cols[1]]['survey_i']
+        same_pp = df[cols[0]]['pp_i'] == df[cols[1]]['pp_i']
+        # check serial score
+        score_ser = (df[cols[0]]['score'] >= ser_min) & (df[cols[0]]['score'] < 100)
+        # check name score
+        score_name = df[cols[1]]['score'] >= name_min
+        # if all True
+        bool = same_survey + same_pp + score_name + score_ser == 4
+        return bool
+    else: return False
+
+
+
+merged['good_match'] = merged.apply(lambda row: good_match(row, ['closest_serial', 'closest_name']), axis = 1)
+
+
+'''
+3.	We still have some duplicate matches where one of the matches has a higher score, are we not keeping the matches with the highest score among duplicates  and dropping the rest?
+'''
 
 # get the highest score among, serial, account and name matches
 def highest_score(df, cols):
-    list = [x[1] for x in df[cols] if (x is not np.nan) & (x is not None)]
+    list = [x['score'] for x in df[cols] if (x is not np.nan) & (x is not None)]
     return max(list)
 
-merged['score'] = merged.apply(lambda row: highest_score(row,['closest_serial','closest_account','closest_name']), axis=1)
+merged['highest_score'] = merged.apply(lambda row: highest_score(row,['closest_serial','closest_account','closest_name']), axis=1)
 
-# filter for good merges
-good_merged = merged[merged['score'] > 90]
+def highest_dup(df, cols = survey.columns.tolist()):
+    '''
+    when duplicates keep only the ones with highest score
+    '''
+    # get all rows
+    bool = merged[cols].isin(df[cols].values.ravel()).all(axis=1)
+    max_dup_score = merged.loc[bool, 'highest_score'].max()
+    yes = df['highest_score'] >= max_dup_score
+    return yes
+
+high_dups = merged.apply(lambda row: highest_dup(row), axis=1)
+
+merged = merged[high_dups]
+
+
+
+
+#############################
 
 # problem: some entries seem to be from the same person but different account or serial numbers or missing
 # solution: put them in a list in a new column
 
-dups_serial = good_merged.groupby(['full_name','transno', 'offered_service'])['serial_num'].apply(lambda x: list(set(list(x)))).reset_index().rename(columns ={'serial_num':'serial_list'})
+dups_serial = merged.groupby(['a3_15','full_name','transno', 'offered_service'])['serial_num'].apply(list).reset_index().rename(columns ={'serial_num':'serial_list'})
 
-good_merged = good_merged.merge(dups_serial, how ='left', on=['full_name','transno', 'offered_service'])
+merged = merged.merge(dups_serial, how ='left', on=['a3_15','full_name','transno', 'offered_service'])
 
-dups_account =  good_merged.groupby(['full_name','transno', 'offered_service'])['account_no'].apply(lambda x: list(x)).reset_index().rename(columns ={'account_no':'account_list'})
+dups_account =  merged.groupby(['a3_15','full_name','transno', 'offered_service'])['account_no'].apply(list).reset_index().rename(columns ={'account_no':'account_list'})
 
-good_merged = good_merged.merge(dups_account, how ='left', on=['full_name','transno', 'offered_service'])
+merged = merged.merge(dups_account, how ='left', on=['a3_15','full_name','transno', 'offered_service'])
 
-good_merged = good_merged.drop_duplicates(subset = ['full_name','transno', 'offered_service'])
+merged = merged.drop_duplicates(subset = ['a3_15','full_name','transno', 'offered_service'])
+
+###############################
+'''
+4.	After doing step 3 above, can we have some summary stats: what proportion of the matches has a score of 100 based on serial id (I think it was about 850 observations)? What proportion has a score above 90 but not equal to 100?
+'''
+
+ser100 = merged[merged['closest_serial'].apply(lambda row: row['score'] == 100 if row is not None else False)].shape[0]
+
+ser90 = merged[merged['closest_serial'].apply(lambda row: row['score'] in range(90,100) if row is not None else False)].shape[0]
+
+print('Proportion score 100 based on serial number:', ser100/merged.shape[0])
+
+print('Proportion score 90-100 based on serial number:', ser90/merged.shape[0])
+
+#####################################################
+'''
+# filter for good merges
+good_merged = merged[merged['score'] > 90]
 
 # duplicates
 duplicates = merged[merged[['full_name','transno']].duplicated(keep='first')].sort_values(['full_name']).shape[0]
@@ -270,5 +352,7 @@ bool = good_merged[['closest_serial','closest_name']].apply(lambda row: (row.clo
 
 #good_merged[bool]
 
+
+good_merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
+'''
 merged.to_csv(wd.parent/'data'/'survey_prepost_matched.csv')
-merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
