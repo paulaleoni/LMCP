@@ -233,21 +233,22 @@ def good_match(df, cols, ser_min = 90, name_min = 75):
     declare good matches
     '''
     # if score serial = 100
-    if df[cols[0]] not in [None, np.nan]:
-        bool = df[cols[0]]['score'] == 100
-        return bool
+    if (df[cols[0]] not in [None, np.nan]):
+        if (df[cols[0]]['score'] == 100):
+            return True
     # if score serial between 90-100 and score name > 75
-    elif (df[cols[0]] not in [None, np.nan]) & (df[cols[1]] not in [None, np.nan]) :
-        # check if same match
-        same_survey = df[cols[0]]['survey_i'] == df[cols[1]]['survey_i']
-        same_pp = df[cols[0]]['pp_i'] == df[cols[1]]['pp_i']
-        # check serial score
-        score_ser = (df[cols[0]]['score'] >= ser_min) & (df[cols[0]]['score'] < 100)
-        # check name score
-        score_name = df[cols[1]]['score'] >= name_min
-        # if all True
-        bool = same_survey + same_pp + score_name + score_ser == 4
-        return bool
+        elif (df[cols[1]] not in [None, np.nan]):
+            # check if same match
+            same_survey = df[cols[0]]['survey_i'] == df[cols[1]]['survey_i']
+            same_pp = df[cols[0]]['pp_i'] == df[cols[1]]['pp_i']
+            # check serial score
+            score_ser = (df[cols[0]]['score'] >= ser_min) & (df[cols[0]]['score'] < 100)
+            # check name score
+            score_name = df[cols[1]]['score'] >= name_min
+            # if all True
+            bool = same_survey + same_pp + score_name + score_ser == 4
+            return bool
+        else: return False
     else: return False
 
 
@@ -301,10 +302,22 @@ merged = merged.merge(dups_account, how ='left', on=identifier)
 
 merged = merged.drop_duplicates(subset = identifier)
 
+# save as csv
+merged.to_csv(wd.parent/'data'/'survey_prepost_matched_02.csv')
+
+'''
+TO DO: in the remaining duplicates, perform a name matching based on a different algorithm and compare the results
+'''
+
+
 ###############################
 '''
 4.	After doing step 3 above, can we have some summary stats: what proportion of the matches has a score of 100 based on serial id (I think it was about 850 observations)? What proportion has a score above 90 but not equal to 100?
 '''
+
+# you might restriction the matching of those who have a highest score above x
+
+#merged = merged[merged['highest_score'] >= 85]
 
 ser100 = merged[merged['closest_serial'].apply(lambda row: row['score'] == 100 if row is not None else False)].shape[0]
 
@@ -313,6 +326,10 @@ ser90 = merged[merged['closest_serial'].apply(lambda row: row['score'] in range(
 print('Proportion score 100 based on serial number:', ser100/merged.shape[0])
 
 print('Proportion score 90-100 based on serial number:', ser90/merged.shape[0])
+
+# get percentage of treatment in matching
+print('percentage share of lmcp: \n')
+print(merged.groupby(['lmcp'])['county'].count()/merged.shape[0],'\n')
 
 #####################################################
 
@@ -359,4 +376,3 @@ print('Proportion score 90-100 based on serial number:', ser90/merged.shape[0])
 
 #good_merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
 
-merged.to_csv(wd.parent/'data'/'survey_prepost_matched_02.csv')
