@@ -207,6 +207,7 @@ merge_account = match_and_merge(pp_input, df_input, newcol = 'closest_account',d
 # get rows that are merged having at least minimum score
 lst_survey_merged_acc = merge_account['closest_account'].apply(lambda row: row['survey_i'] if row['score'] >= min_score else None).dropna().tolist()
 lst_survey_merged_acc.extend(lst_survey_merged)
+
 lst_pp_merged_acc = merge_account['closest_account'].apply(lambda row: row['pp_i'] if row['score'] >= min_score else None).dropna().tolist()
 lst_pp_merged_acc.extend(lst_pp_merged)
 
@@ -271,8 +272,10 @@ def highest_dup(df, cols = survey.columns.tolist()):
     '''
     # get all rows
     bool = merged[cols].isin(df[cols].values.ravel()).all(axis=1)
+    # maximum score in group
     max_dup_score = merged.loc[bool, 'highest_score'].max()
-    yes = df['highest_score'] >= max_dup_score
+    # return True if row has highest score or is declared as good match
+    yes = (df['highest_score'] >= max_dup_score) or df['good_match'] 
     return yes
 
 high_dups = merged.apply(lambda row: highest_dup(row), axis=1)
@@ -280,22 +283,23 @@ high_dups = merged.apply(lambda row: highest_dup(row), axis=1)
 merged = merged[high_dups]
 
 
-
-
 #############################
 
 # problem: some entries seem to be from the same person but different account or serial numbers or missing
 # solution: put them in a list in a new column
 
-dups_serial = merged.groupby(['a3_15','full_name','transno', 'offered_service'])['serial_num'].apply(list).reset_index().rename(columns ={'serial_num':'serial_list'})
+identifier = survey.columns.tolist()
+identifier.extend(['full_name', 'offered_service'])
 
-merged = merged.merge(dups_serial, how ='left', on=['a3_15','full_name','transno', 'offered_service'])
+dups_serial = merged.groupby(identifier)['serial_num'].apply(list).reset_index().rename(columns ={'serial_num':'serial_list'})
 
-dups_account =  merged.groupby(['a3_15','full_name','transno', 'offered_service'])['account_no'].apply(list).reset_index().rename(columns ={'account_no':'account_list'})
+merged = merged.merge(dups_serial, how ='left', on=identifier)
 
-merged = merged.merge(dups_account, how ='left', on=['a3_15','full_name','transno', 'offered_service'])
+dups_account =  merged.groupby(identifier)['account_no'].apply(list).reset_index().rename(columns ={'account_no':'account_list'})
 
-merged = merged.drop_duplicates(subset = ['a3_15','full_name','transno', 'offered_service'])
+merged = merged.merge(dups_account, how ='left', on=identifier)
+
+merged = merged.drop_duplicates(subset = identifier)
 
 ###############################
 '''
@@ -311,34 +315,34 @@ print('Proportion score 100 based on serial number:', ser100/merged.shape[0])
 print('Proportion score 90-100 based on serial number:', ser90/merged.shape[0])
 
 #####################################################
-'''
+
 # filter for good merges
-good_merged = merged[merged['score'] > 90]
+#good_merged = merged[merged['score'] > 90]
 
 # duplicates
-duplicates = merged[merged[['full_name','transno']].duplicated(keep='first')].sort_values(['full_name']).shape[0]
+#duplicates = merged[merged[['full_name','transno']].duplicated(keep='first')].sort_values(['full_name']).shape[0]
 #reasons: offered_service
 
 #print('unique merges:', merged.shape[0]-duplicates)
 #print('survey entries:', survey.shape[0])
 
-good_rows = good_merged.shape[0]
-print(f'number of rows: {good_rows}')
+#good_rows = good_merged.shape[0]
+#print(f'number of rows: {good_rows}')
 
 # get percentage of treatment in matching
-print('percentage share of lmcp: \n')
-print(good_merged.groupby(['lmcp'])['county'].count()/good_merged.shape[0],'\n')
+#print('percentage share of lmcp: \n')
+#print(good_merged.groupby(['lmcp'])['county'].count()/good_merged.shape[0],'\n')
 
 # check duplicates
 
-cols = survey.columns.tolist()
-cols.append('offered_service')
+#cols = survey.columns.tolist()
+#cols.append('offered_service')
 
-print('all duplicated rows: \n')
-duplicates = good_merged[good_merged[cols].duplicated(keep=False)].shape[0]
-print(f'N = {duplicates}')
-with pd.option_context("display.max_rows", None, "display.max_columns", None):
-    display(good_merged[good_merged[cols].duplicated(keep=False)].sort_values(survey.columns.tolist(), axis=0).drop(['hh_member5','hh_member6','hh_member7','hh_member8','hh_member9','hh_member10','hh_member11','hh_member12','hh_member13','hh_member14','hh_member15'], axis=1))
+#print('all duplicated rows: \n')
+#duplicates = good_merged[good_merged[cols].duplicated(keep=False)].shape[0]
+#print(f'N = {duplicates}')
+#with pd.option_context("display.max_rows", None, "display.max_columns", None):
+ #   display(good_merged[good_merged[cols].duplicated(keep=False)].sort_values(survey.columns.tolist(), axis=0).drop(['hh_member5','hh_member6','hh_member7','hh_member8','hh_member9','hh_member10','hh_member11','hh_member12','hh_member13','hh_member14','hh_member15'], axis=1))
 
 
 # randomly select x% of merged dataframe
@@ -348,11 +352,11 @@ with pd.option_context("display.max_rows", None, "display.max_columns", None):
 
 # attempt to keep those with closest_serial and closest_name equal
 
-bool = good_merged[['closest_serial','closest_name']].apply(lambda row: (row.closest_serial[0] == row.closest_name[0])*(row.closest_serial[1] > 95) if pd.notnull(row).values.all() else False , axis=1).replace({0:False,1:True})
+#bool = good_merged[['closest_serial','closest_name']].apply(lambda row: (row.closest_serial[0] == row.closest_name[0])*(row.closest_serial[1] > 95) if pd.notnull(row).values.all() else False , axis=1).replace({0:False,1:True})
 
 #good_merged[bool]
 
 
-good_merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
-'''
-merged.to_csv(wd.parent/'data'/'survey_prepost_matched.csv')
+#good_merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
+
+merged.to_csv(wd.parent/'data'/'survey_prepost_matched_02.csv')
