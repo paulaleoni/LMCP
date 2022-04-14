@@ -4,6 +4,7 @@ merge post- and prepaid data with survey
  fuzzy matching
 '''
 
+from sys import displayhook
 import pandas as pd
 #pd.set_option('max_columns', None)
 from zipfile import ZipFile
@@ -302,21 +303,44 @@ merged = merged.merge(dups_account, how ='left', on=identifier)
 
 merged = merged.drop_duplicates(subset = identifier)
 
+
+
+'''
+in the remaining duplicates, perform a name matching based on a different algorithm
+'''
+
+# list of names columns in survey: names_list
+
+algo_match = fuzz.token_sort_ratio
+merged['name_match_score'] = merged.apply(lambda row: process.extractOne(row.full_name, row[names_list], scorer=algo_match)[1] , axis=1)
+
+# keep duplicates with highes match
+def dups_name_match(df, cols = survey.columns.tolist()):
+    '''
+    when duplicates keep only the ones with highest name_match_score
+    '''
+    # get all rows
+    bool = merged[cols].isin(df[cols].values.ravel()).all(axis=1)
+    # maximum score in group
+    max_dup_score = merged.loc[bool, 'name_match_score'].max()
+    # return True if row has highest score 
+    bool = (df['name_match_score'] >= max_dup_score) 
+    return bool
+    
+# boolean serios
+dups_highest_name = merged.apply(lambda row: dups_name_match(row), axis=1)
+
+# keep those with highest match among duplicates
+merged = merged[dups_highest_name]
+
 # save as csv
-merged.to_csv(wd.parent/'data'/'survey_prepost_matched_02.csv')
-
-'''
-TO DO: in the remaining duplicates, perform a name matching based on a different algorithm and compare the results
-'''
-
-
+merged.to_csv(wd.parent/'data'/'survey_prepost_matched.csv', index=False)
 ###############################
 '''
 4.	After doing step 3 above, can we have some summary stats: what proportion of the matches has a score of 100 based on serial id (I think it was about 850 observations)? What proportion has a score above 90 but not equal to 100?
 '''
 
 # you might restriction the matching of those who have a highest score above x
-
 #merged = merged[merged['highest_score'] >= 85]
 
 ser100 = merged[merged['closest_serial'].apply(lambda row: row['score'] == 100 if row is not None else False)].shape[0]
@@ -327,6 +351,8 @@ print('Proportion score 100 based on serial number:', ser100/merged.shape[0])
 
 print('Proportion score 90-100 based on serial number:', ser90/merged.shape[0])
 
+print('Proportion score >= 90:', merged[merged.highest_score >=90].shape[0]/merged.shape[0])
+
 # get percentage of treatment in matching
 print('percentage share of lmcp: \n')
 print(merged.groupby(['lmcp'])['county'].count()/merged.shape[0],'\n')
@@ -335,10 +361,6 @@ print(merged.groupby(['lmcp'])['county'].count()/merged.shape[0],'\n')
 
 # filter for good merges
 #good_merged = merged[merged['score'] > 90]
-
-# duplicates
-#duplicates = merged[merged[['full_name','transno']].duplicated(keep='first')].sort_values(['full_name']).shape[0]
-#reasons: offered_service
 
 #print('unique merges:', merged.shape[0]-duplicates)
 #print('survey entries:', survey.shape[0])
@@ -367,11 +389,6 @@ print(merged.groupby(['lmcp'])['county'].count()/merged.shape[0],'\n')
 #x = 0.05
 #    display(merged.sample(frac = x))
 
-# attempt to keep those with closest_serial and closest_name equal
-
-#bool = good_merged[['closest_serial','closest_name']].apply(lambda row: (row.closest_serial[0] == row.closest_name[0])*(row.closest_serial[1] > 95) if pd.notnull(row).values.all() else False , axis=1).replace({0:False,1:True})
-
-#good_merged[bool]
 
 
 #good_merged.to_csv(wd.parent/'data'/'survey_prepost_matched_good.csv')
