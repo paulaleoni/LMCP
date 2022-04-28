@@ -140,6 +140,9 @@ pp.columns = pp.columns.str.lower()
 # remove non informative entries
 pp = pp.dropna(subset=['full_name','serial_num','account_no'])
 
+# remove leading and trailing spaces
+pp['serial_num'] = pp['serial_num'].replace(regex=r"^\s+|\s+$", value = '')
+pp['account_no'] = pp['account_no'].replace(regex=r"^\s+|\s+$", value = '')
 
 pp['county'] = pp['county'].str.lower()
 
@@ -311,7 +314,7 @@ in the remaining duplicates, perform a name matching based on a different algori
 
 # list of names columns in survey: names_list
 
-algo_match = fuzz.token_sort_ratio
+algo_match = fuzz.token_sort_ratio # fuzz.partial_ratio for partial matches
 merged['name_match_score'] = merged.apply(lambda row: process.extractOne(row.full_name, row[names_list], scorer=algo_match)[1] , axis=1)
 
 # keep duplicates with highes match
