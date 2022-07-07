@@ -135,14 +135,14 @@ for(i in 1:length(list_df)){
   # percentage purchases day of month
   plt <- df %>% ggplot(aes(dayofmonth)) + geom_bar(aes(y = (..count..)/sum(..count..))) +
     scale_y_continuous(labels=scales::percent) +
-    theme_minimal() + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
     labs(title="Day of Month", caption="percentage of purchases per day of month")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_dayofmonth.png'))
   ggsave(path_plt, plt)
   # percentage purchases day of week
   plt <- df %>% ggplot(aes(dayofweek)) + geom_bar(aes(y = (..count..)/sum(..count..))) +
     scale_y_continuous(labels=scales::percent) +
-    theme_minimal() + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
     labs(title="Day of Week", caption="percentage of purchases per weekday")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_dayofweek.png'))
   ggsave(path_plt, plt)
@@ -164,7 +164,7 @@ for(i in 1:length(list_df)){
     ggplot(aes(x=units)) + 
     geom_histogram(aes(y=..density..), color=1, fill = "white") + 
     geom_density(color='black') +
-    theme_minimal() + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
     labs(title="Distribution of monthly usage", caption="distribution of average monthly units per meter - lower 99%")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_distribution_units.png'))
   ggsave(path_plt, plt)
@@ -173,7 +173,7 @@ for(i in 1:length(list_df)){
     ggplot(aes(x=amount)) + 
     geom_histogram(aes(y=..density..), color=1, fill = "white") + 
     geom_density(color='black') +
-    theme_minimal() + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
     labs(title="Distribution of monthly usage", caption="distribution of average monthly amount per meter - lower 99%")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_distribution_amount.png'))
   ggsave(path_plt, plt)
@@ -228,8 +228,9 @@ for(i in 1:length(list_df)){
               amount = median(amount, na.rm=T))
   plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
     geom_line(aes(x = months_since_installation, y = units, colour=connection_cat)) + 
-    theme_minimal() + ylab("units in KwH?") + xlab("months since installation date") + 
-    labs(title = "median monthly meter consumption since connection", colour="")
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("units in KwH?") + xlab("months since connection date") + 
+    labs(title = "median monthly meter consumption since connection", colour="connected")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_cons_since_connection.png'))
   ggsave(path_plt, plt)
 }
@@ -241,9 +242,10 @@ for(i in 1:length(list_df)){
   #customers
   plt <- df %>% group_by(year) %>%
     summarise(n_cust = n_distinct(meternumber)) %>%
+    mutate(year = paste0(as.character(year),'01','01') %>% as.Date(format='%Y%m%d')) %>%
     ggplot() +
     geom_line(aes(x=year, y=n_cust)) +
-    theme_minimal() + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
     ylab("total number of customers")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ts_ncust.png'))
   ggsave(path_plt, plt)
@@ -251,10 +253,10 @@ for(i in 1:length(list_df)){
   scale_units <- 100000
   plt <- df %>% group_by(year) %>%
     summarise(units = sum(units)) %>%
+    mutate(year = paste0(as.character(year),'01','01') %>% as.Date(format='%Y%m%d')) %>%
     ggplot() +
     geom_line(aes(x=year, y=units/scale_units)) +
-    scale_x_continuous(breaks=seq(min(df$year),max(df$year),1)) +
-    theme_minimal() + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
     ylab(paste("total sum of units sold in", scale_units,"KwH?"))
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ts_totunits.png'))
   ggsave(path_plt, plt)
@@ -269,8 +271,9 @@ for(i in 1:length(list_df)){
     summarise(n_cust = n_distinct(meternumber))
   plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
     geom_line(aes(x = months_since_installation, y = n_cust, colour=connection_cat)) +
-    theme_minimal() + ylab("monthly number of customers") + xlab("months since installation date") + 
-    labs(colour="")
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("monthly number of customers") + xlab("months since connection date") + 
+    labs(colour="connected")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ncust_since_connection.png'))
   ggsave(path_plt, plt)
     
