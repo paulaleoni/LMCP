@@ -3,6 +3,7 @@
 library(tidyverse)
 #library(grid)
 library(gridExtra)
+library(lubridate)
 
 getCurrentFileLocation <-  function()
 {
@@ -106,6 +107,13 @@ modify_dates <- function(df){
                                                              ifelse(installation_date >= as.Date("2018-07-01"), cats[3],NA))))
   df$connection_cat <- df$connection_cat %>% factor(levels=cats,
                                                     labels=cats)
+  # get months since connection
+  df['months_since_installation'] <- interval(df$installation_date, df$billing_date ) %/% months(1)
+  # get months since first billing date
+  df['months_since_firstbill'] <- interval(df$first_billing_date, df$billing_date ) %/% months(1)
+  # gap between installation data and first bill
+  df['gap'] <- interval(df$installation_date, df$first_billing_date ) %/% months(1)
+  
   print('done')
   return(df)
   }
@@ -114,10 +122,6 @@ df_txt <- df_txt %>% drop_na(billing_date) %>% group_df() %>% modify_dates()
 df_post <- df_post %>% drop_na(billing_date) %>% group_df() %>% modify_dates()
 df_pre <- df_pre %>% drop_na(billing_date) %>% group_df() %>% modify_dates()
 
-# get months since connection
-df_txt['months_since_installation'] <- difftime(df_txt$billing_date, df_txt$installation_date, units="weeks") %>% as.integer()
-df_post['months_since_installation'] <- difftime(df_post$billing_date, df_post$installation_date, units="weeks") %>% as.integer()
-df_pre['months_since_installation'] <- difftime(df_pre$billing_date, df_pre$installation_date, units="weeks") %>% as.integer()
 
 
 
@@ -179,6 +183,20 @@ for(i in 1:length(list_df)){
   ggsave(path_plt, plt)
 }
 
+# histogram of gap between connection date and first bill
+for(i in 1:length(list_df)){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  plt <- df %>% select(meternumber, gap) %>% distinct() %>% 
+    ggplot(aes(x=gap)) + 
+    geom_histogram(aes(y=..density..), color=1, fill = "white") + 
+    geom_density(color='black') +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
+    labs(caption="Distribution of gap between connection date and first billing date in months", title="Distribution of gap")
+  path_plt <- file.path(path_figures, name_df,paste0(name_df,'_distribution_gap.png'))
+  ggsave(path_plt, plt)
+}
+
 # time series plots
 for(i in 1:length(list_df)){
   df <- list_df[[i]]
@@ -235,29 +253,67 @@ for(i in 1:length(list_df)){
   ggsave(path_plt, plt)
 }
 
+
+
+#df_pre %>% filter(months_since_installation == 66) %>% filter(connection_cat == "mid 2016 to mid 2018")
+
+# consumption since first bill
+for(i in 1:length(list_df)){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  # total consumption per meter each month
+  df <- df %>% group_by(connection_cat, months_since_firstbill, meternumber)%>% # total amount per meternumber each month since connection
+    summarise(units = sum(units, na.rm=T),
+              amount = sum(amount, na.rm=T)) %>%
+    group_by(connection_cat, months_since_firstbill) %>% 
+    summarise(units = median(units, na.rm=T), # average consumption per months_since_connection per connection_cat
+              amount = median(amount, na.rm=T))
+  plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
+    geom_line(aes(x = months_since_firstbill, y = units, colour=connection_cat)) + 
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("units in KwH?") + xlab("months since first billing date") + 
+    labs(title = "median monthly meter consumption since first bill", colour="connected")
+  path_plt <- file.path(path_figures, name_df,paste0(name_df,'_cons_since_firstbill.png'))
+  ggsave(path_plt, plt)
+}
+
 # #customers and total units per year
 for(i in 1:length(list_df)){
   df <- list_df[[i]]
   name_df <- list_df_names[[i]]
   #customers
-  plt <- df %>% group_by(year) %>%
+  plt <- df %>% filter(year < 2022) %>% group_by(year) %>%
     summarise(n_cust = n_distinct(meternumber)) %>%
     mutate(year = paste0(as.character(year),'01','01') %>% as.Date(format='%Y%m%d')) %>%
     ggplot() +
     geom_line(aes(x=year, y=n_cust)) +
     theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
-    ylab("total number of customers")
+    ylab("total number of customers") + 
+    labs(caption = "number of distinct meters in each year")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ts_ncust.png'))
+  ggsave(path_plt, plt)
+  # new customers
+  df['first_year'] <- df[['first_billing_date']] %>% format.POSIXct(format='%Y') %>% as.numeric()
+  plt <- df %>% filter(year < 2022) %>% group_by(first_year) %>%
+    summarise(n_cust = n_distinct(meternumber)) %>%
+    mutate(year = paste0(as.character(first_year),'01','01') %>% as.Date(format='%Y%m%d')) %>%
+    ggplot() +
+    geom_line(aes(x=first_year, y=n_cust)) +
+    theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
+    ylab("total number of customers") + 
+    labs(caption = "number of distinct meters with first bill in each year")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ts_ncust_new.png'))
   ggsave(path_plt, plt)
   # total units
   scale_units <- 100000
-  plt <- df %>% group_by(year) %>%
+  plt <- df %>% filter(year < 2022) %>% group_by(year) %>%
     summarise(units = sum(units)) %>%
     mutate(year = paste0(as.character(year),'01','01') %>% as.Date(format='%Y%m%d')) %>%
     ggplot() +
     geom_line(aes(x=year, y=units/scale_units)) +
     theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
-    ylab(paste("total sum of units sold in", scale_units,"KwH?"))
+    ylab(paste("total sum of units sold in", scale_units,"KwH?")) + 
+    labs(caption = "total sum of units purchased in each year")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ts_totunits.png'))
   ggsave(path_plt, plt)
 }
@@ -278,5 +334,22 @@ for(i in 1:length(list_df)){
   ggsave(path_plt, plt)
     
 }
+
+# #customers since first bill
+for(i in 1:length(list_df)){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  # total consumption per meter each month
+  df <- df %>% group_by(months_since_firstbill, connection_cat) %>% 
+    summarise(n_cust = n_distinct(meternumber))
+  plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
+    geom_line(aes(x = months_since_firstbill, y = n_cust, colour=connection_cat)) +
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("monthly number of distinct customers") + xlab("months since first billing date") + 
+    labs(colour="connected")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ncust_since_firstbill.png'))
+  ggsave(path_plt, plt)
+}
+
 
 
