@@ -4,6 +4,8 @@ library(tidyverse)
 #library(grid)
 library(gridExtra)
 library(lubridate)
+library(xtable)
+library(fixest)
 
 getCurrentFileLocation <-  function()
 {
@@ -124,7 +126,6 @@ df_pre <- df_pre %>% drop_na(billing_date) %>% group_df() %>% modify_dates()
 
 
 
-
 #### figures ####
 # set path to save figures
 path_figures <-  file.path(wd.parent,'figures','Rfigures')
@@ -152,6 +153,46 @@ for(i in 1:length(list_df)){
   ggsave(path_plt, plt)
 }
 
+### top up
+for(i in 1:length(list_df)){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  # prepare data
+  dates <- df %>% group_by(meternumber, yearmonth, billing_date) %>% select(billing_date, dayofmonth, dayofweek)
+  df <- df %>%  group_by(meternumber, yearmonth, billing_date) %>% ungroup(billing_date) %>% 
+    summarise(row = row_number())  %>%
+    mutate(topup = ifelse(row > 1, TRUE, FALSE)) %>%
+    cbind(dates[,c('billing_date','dayofmonth','dayofweek')]) 
+  df <- df %>%  mutate(lag_bill = lag(billing_date)) %>%
+    filter(topup == TRUE)
+  df['gap'] <- difftime(df$billing_date, df$lag_bill, units='days') %>% as.integer()
+  # topups per weekday
+  plt <- df %>% ggplot(aes(dayofweek)) +
+    geom_bar(aes(y = (..count..)/sum(..count..))) +
+    scale_y_continuous(labels=scales::percent) +
+    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
+    labs(title="Top-up per day of week", caption="percentage of top-ups (2nd, 3rd,... purchase in month) per weekday")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_topup_dayofweek.png'))
+  ggsave(path_plt, plt)
+  # frequency gap between topups
+  plt <- df %>%  ggplot(aes(x=gap)) + 
+    geom_histogram(aes(y=..density..), color='grey', fill = "grey", binwidth=1, center=0) + 
+    theme_minimal() + theme(text = element_text(size=6)) +  xlab("days") +
+    labs(title="Histogram of gap between top-ups", caption="top-up: 2nd, 3rd,... purchase in one month")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_topup_histogram_gap.png'))
+  ggsave(path_plt, plt)
+  # frequency of topups per month
+  plt <- df %>% 
+    summarise(n_topup = sum(topup)) %>% 
+    filter(n_topup > 0 ) %>% #,sum <= quantile(sum,probs=c(0.99))
+    ggplot(aes(x=n_topup)) +
+    geom_histogram(aes(y=..density..), color='grey', fill = "grey", binwidth=1, center=0) + 
+    theme_minimal() + theme(text = element_text(size=6))  + xlab("number of top-ups") +
+    labs(title="Histogram of top-up", caption="top-up: 2nd, 3rd,... purchase in one month")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_topup_histogram.png'))
+  ggsave(path_plt, plt)
+} 
+  
 # histograms of monthly usage
 for(i in 1:length(list_df)){
   df <- list_df[[i]]
@@ -168,7 +209,7 @@ for(i in 1:length(list_df)){
     ggplot(aes(x=units)) + 
     geom_histogram(aes(y=..density..), color=1, fill = "white") + 
     geom_density(color='black') +
-    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6))  + xlab("") +
     labs(title="Distribution of monthly usage", caption="distribution of average monthly units per meter - lower 99%")
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_distribution_units.png'))
   ggsave(path_plt, plt)
@@ -177,7 +218,7 @@ for(i in 1:length(list_df)){
     ggplot(aes(x=amount)) + 
     geom_histogram(aes(y=..density..), color=1, fill = "white") + 
     geom_density(color='black') +
-    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
     labs(title="Distribution of monthly usage", caption="distribution of average monthly amount per meter - lower 99%")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_distribution_amount.png'))
   ggsave(path_plt, plt)
@@ -191,7 +232,7 @@ for(i in 1:length(list_df)){
     ggplot(aes(x=gap)) + 
     geom_histogram(aes(y=..density..), color=1, fill = "white") + 
     geom_density(color='black') +
-    theme_minimal() + theme(text = element_text(size=6)) + ylab("") + xlab("") +
+    theme_minimal() + theme(text = element_text(size=6)) + xlab("") +
     labs(caption="Distribution of gap between connection date and first billing date in months", title="Distribution of gap")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_distribution_gap.png'))
   ggsave(path_plt, plt)
@@ -233,7 +274,7 @@ for(i in 1:length(list_df)){
   ggsave(path_plt, plt)
 }
 
-# consumption since connection
+# consumption and amount since connection
 for(i in 1:length(list_df)){
   df <- list_df[[i]]
   name_df <- list_df_names[[i]]
@@ -251,13 +292,44 @@ for(i in 1:length(list_df)){
     labs(title = "median monthly meter consumption since connection", colour="connected")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_cons_since_connection.png'))
   ggsave(path_plt, plt)
+  plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
+    geom_line(aes(x = months_since_installation, y = amount, colour=connection_cat)) + 
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("amount") + xlab("months since connection date") + 
+    labs(title = "median monthly amount since connection", colour="connected")
+  path_plt <- file.path(path_figures, name_df,paste0(name_df,'_amount_since_connection.png'))
+  ggsave(path_plt, plt)
+}
+
+#df_pre %>% filter(months_since_installation == 66) %>% filter(connection_cat == "mid 2016 to mid 2018")
+
+
+# residuals of amount since connection
+for(i in 2:3){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  # estimate transformer FE
+  df <- df %>% group_by(connection_cat, months_since_firstbill, meternumber, transno) %>% # total amount per meternumber each month since connection
+    summarise(units = sum(units, na.rm=T),
+              amount = sum(amount, na.rm=T))
+  mod <- feols(amount ~ 1 + transno, data = df, vcov="hetero")
+  pred <- predict(mod, df)
+  df['res'] <- df$amount - pred
+  plt <- df %>% group_by(connection_cat, months_since_firstbill) %>% 
+    summarise(res = median(res)) %>%
+    ggplot()  + 
+    geom_line(aes(x = months_since_firstbill, y = res, colour=connection_cat)) + 
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("residuals") + xlab("months since connection date") + 
+    labs(title = "median monthly residual amount since connection", colour="connected",
+         caption = "predicted amount using transformer FE - actual amount ") 
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_residuals_since_firstbill.png'))
+  ggsave(path_plt, plt)
 }
 
 
 
-#df_pre %>% filter(months_since_installation == 66) %>% filter(connection_cat == "mid 2016 to mid 2018")
-
-# consumption since first bill
+# consumption and amount since first bill
 for(i in 1:length(list_df)){
   df <- list_df[[i]]
   name_df <- list_df_names[[i]]
@@ -274,6 +346,13 @@ for(i in 1:length(list_df)){
     ylab("units in KwH?") + xlab("months since first billing date") + 
     labs(title = "median monthly meter consumption since first bill", colour="connected")
   path_plt <- file.path(path_figures, name_df,paste0(name_df,'_cons_since_firstbill.png'))
+  ggsave(path_plt, plt)
+  plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
+    geom_line(aes(x = months_since_firstbill, y = amount, colour=connection_cat)) + 
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("units in KwH?") + xlab("months since first billing date") + 
+    labs(title = "median monthly amount paid since first bill", colour="connected")
+  path_plt <- file.path(path_figures, name_df,paste0(name_df,'_amount_since_firstbill.png'))
   ggsave(path_plt, plt)
 }
 
@@ -350,6 +429,61 @@ for(i in 1:length(list_df)){
   path_plt <- file.path(path_figures, name_df, paste0(name_df,'_ncust_since_firstbill.png'))
   ggsave(path_plt, plt)
 }
+
+# top ups since first bill
+for(i in 1:length(list_df)){
+  df <- list_df[[i]]
+  name_df <- list_df_names[[i]]
+  # total consumption per meter each month
+  df <- df %>% group_by(yearmonth,  meternumber) %>% 
+    tally() %>% merge(df[,c('meternumber','yearmonth','connection_cat','months_since_firstbill')]) %>% 
+    distinct(meternumber, yearmonth, .keep_all= TRUE)
+  df <- df %>% group_by(connection_cat, months_since_firstbill) %>% summarise(nbills = mean(n))
+  plt <- df %>% drop_na(connection_cat) %>% ggplot() + 
+    geom_line(aes(x = months_since_firstbill, y = nbills, colour=connection_cat)) +
+    theme_minimal() + theme(text = element_text(size=6)) +
+    ylab("average monthly number of purchases") + xlab("months since first billing date") + 
+    labs(colour="connected")
+  path_plt <- file.path(path_figures, name_df, paste0(name_df,'_avbills_since_firstbill.png'))
+  ggsave(path_plt, plt)
+}
+
+
+
+#### tables ####
+
+#### Summary stats table with average amount/month and times/month for all LMCP and for our 6 counties 
+all_lmcp <- df_pre %>% group_by(yearmonth, meternumber) %>% summarise(amount = sum(amount),
+                                                      times = n())  
+
+#part_lmcp <- df_pre %>% filter(county in c()) group_by(yearmonth, meternumber) %>% summarise(sum(amount),
+                                                                       #times = n())
+stats= summary(all_lmcp[,c('amount','times')])
+print(xtable(stats), 
+      file=file.path(path_figures,"pre_stats.tex"),include.rownames=FALSE, replace=TRUE)
+
+#df_pre %>% select(county) %>% distinct()
+
+#### compare lmcp vs. nonlmcp
+# monthly amount
+pre_amount_monthly <- df_pre %>% group_by(meternumber, yearmonth) %>% 
+  summarise(amount=sum(amount, na.rm=TRUE)) 
+post_amount_monthly <- df_post %>% group_by(meternumber, yearmonth) %>% 
+  summarise(amount=sum(amount, na.rm=TRUE))
+pre_stats <- summary(pre_amount_monthly$amount)
+post_stats <- summary(post_amount_monthly$amount)
+stats <- t(rbind(pre_stats, post_stats))
+colnames(stats) <- c('prepaid','postpaid')
+print(xtable(stats), 
+      file=file.path(path_figures,"amount_monthly_stats.tex"), replace=TRUE)
+
+# amount per bill
+pre_stats <- summary(df_pre$amount)
+post_stats <- summary(df_post$amount)
+stats <- t(rbind(pre_stats, post_stats))
+colnames(stats) <- c('prepaid','postpaid')
+print(xtable(stats), 
+      file=file.path(path_figures,"amount_stats.tex"), replace=TRUE)
 
 
 
